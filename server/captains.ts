@@ -56,6 +56,7 @@ import { codexModel, type ManagerCli } from "../shared/agentCli.js"
 import { TurnClock, turnTiming, type McpHandshakes } from "./turnTimings.js"
 import { perfMark } from "./perfTrace.js"
 import { captainReplyWakes, takeFyiMarker } from "./captainWake.js"
+import { takeOwnerQuestionMarker } from "../shared/ownerQuestions.js"
 import { WarmClaude, warmKey } from "./warmClaude.js"
 import { CaptainStreamer } from "../shared/captainStream.js"
 import { NO_PICKS, turnPicks, type TurnPicks } from "../shared/runTargets.js"
@@ -71,6 +72,8 @@ export const CAPTAIN_WAIT_MAX_SECONDS = 60
 export const CAPTAIN_WAIT_DEFAULT_SECONDS = 30
 /** ask/wait_for_captain's word on a status-only project's Captain, in place of its chat. */
 export const STATUS_ONLY_CAPTAIN = "Status only: you get this Captain's replies to you, not the rest of its chat (task updates and its other conversations)."
+/** What the Coordinator hears when a status-only project's Captain answers it with a question for Cody. */
+export const STATUS_ONLY_OWNER_QUESTION = "I asked Cody a question. It's in Cody's Inbox, and the answer comes straight back to me (this project shows you its status only)."
 const MAX_THRESHOLD_SHARE = 0.95
 
 type RunKind = "turn" | "summary" | "compact" | "context"
@@ -80,7 +83,7 @@ interface RunAsk {
   replySource?: CaptainSource
   requestedAt?: number | null
   /** The turn's `result` line came without an error: its reply is final, though the CLI takes a while longer to exit. */
-  onResult?: (reply: { text: string; fyi: boolean }) => void
+  onResult?: (reply: { text: string; fyi: boolean; ownerQuestion: boolean }) => void
   /** Images attached to the messages it answers: a Codex run gets them with the prompt (Claude Code opens them with Read). */
   images?: string[]
 }
@@ -94,13 +97,15 @@ interface RunResult {
   sessionId: string | null
   /** The Captain marked its reply FYI (captainWake.ts): the Coordinator needn't act on it. */
   fyi?: boolean
+  /** The reply holds a question for Cody (shared/ownerQuestions.ts): it goes to Cody's Inbox, never as an FYI. */
+  ownerQuestion?: boolean
   /** The login it ran on (docs/logins.md), when it was handed one. */
   login?: PickedLogin | null
   /** Cody stopped it (Captain.stopTurn): not an error. */
   stopped?: boolean
 }
 /** A turn's reply, as it goes up to the Coordinator. */
-type TurnReply = Pick<RunResult, "ok" | "error" | "text" | "fyi" | "stopped">
+type TurnReply = Pick<RunResult, "ok" | "error" | "text" | "fyi" | "ownerQuestion" | "stopped">
 
 const sessionKey = (projectId: string) => `captain_session:${projectId}`
 const startedKey = (projectId: string) => `captain_session_started:${projectId}`
@@ -213,6 +218,8 @@ export interface CaptainReport {
   replyTo?: string[]
   /** Only for Cody's information: it shows on the Coordinator chat without waking the Coordinator (captainWake.ts). */
   fyi?: boolean
+  /** It holds a question for Cody (the owner-question line): it always wakes the Coordinator, and waits for an Inbox item. */
+  ownerQuestion?: boolean
 }
 
 /** An ask_captain/wait_for_captain call waiting for a reply. */
@@ -252,6 +259,12 @@ export class CaptainManager {
   /** Each Captain's own MCP bearer token, so the MCP server can scope it to its project. */
   private readonly tokens = new Map<string, string>()
   onReport: ((projectId: string, content: string, report: CaptainReport) => void) | null = null
+  /**
+   * A Captain's question for Cody that reaches no Coordinator notice: a status-only project's (straight to the Inbox),
+   * or one the Coordinator got in an ask/wait_for_captain result. app.ts files it (OwnerQuestions.captainAsked); one
+   * that does reach a notice comes through onReport with ownerQuestion.
+   */
+  onOwnerQuestion: ((projectId: string, content: string) => void) | null = null
   /**
    * A Captain turn that read these agent messages (message_captain) ended; `reply` is what the turn said.
    * An agent still waiting on one without a reply_to_agent/send_to_task hears that, so it stops waiting.
@@ -317,6 +330,7 @@ export class CaptainManager {
         () => this.gitAuth?.(project.id) ?? null,
         () => (this.connectors ? this.connectors({ kind: "captain", projectId: project.id }) : Promise.resolve(NO_SESSION_CONNECTORS)),
         () => this.projectDefaults?.(project.id) ?? null,
+        (text) => this.onOwnerQuestion?.(project.id, text),
       )
       this.captains.set(project.id, captain)
     }
@@ -704,6 +718,8 @@ class Captain {
     private readonly connectors: () => Promise<SessionConnectors> = () => Promise.resolve(NO_SESSION_CONNECTORS),
     /** Its project's live defaults for new tasks (TaskManager.projectDefaults), the last line of [Project now]. */
     private readonly defaults: () => ProjectDefaults | null = () => null,
+    /** A question for Cody to wait for an Inbox item without a Coordinator notice (status only, or a tool result had it). */
+    private readonly ownerAsked: (text: string) => void = () => {},
   ) {
     this.loopGuard = new WakeLoopGuard(tuning.loopGuard)
     this.mcp = mcp
@@ -1305,23 +1321,31 @@ class Captain {
     const fromCoordinator = answered.filter((m) => captainSourceOf(m) === "coordinator")
     const asked = fromCoordinator.map((m) => m.id)
     if (!asked.length) return
-    const text = result.ok ? result.text.trim() : result.stopped ? withOwner(CAPTAIN_STOPPED_REPLY, this.owner()) : `I hit an error: ${result.error.slice(0, 500)}`
+    const said = result.ok ? result.text.trim() : result.stopped ? withOwner(CAPTAIN_STOPPED_REPLY, this.owner()) : `I hit an error: ${result.error.slice(0, 500)}`
+    const question = this.ownerQuestionOf(result)
+    // A status-only project's question goes to Cody's Inbox: the Coordinator hears only that it went there.
+    const sealed = question !== null && this.statusOnly()
+    const text = sealed ? withOwner(STATUS_ONLY_OWNER_QUESTION, this.owner()) : said
     this.lastCoordinatorReply = { ids: asked, text: text === NO_UPDATE ? "" : text.slice(0, TOOL_REPLY_MAX) }
     const takers = [...this.waiters].filter((w) => !w.ids || w.ids.some((id) => asked.includes(id)))
     const taken = new Set(takers.flatMap((w) => w.ids ?? asked))
     for (const w of takers) w.done()
     const replyTo = asked.filter((id) => !taken.has(id))
+    // The Coordinator got it in its tool result (or, status only, mustn't see it): it still waits for an Inbox item.
+    if (question !== null && (sealed || !replyTo.length)) this.ownerAsked(question)
     if (!replyTo.length) return
     if (!text || text === NO_UPDATE) return
-    // Stopped by Cody: an FYI, unless the Coordinator was waiting on the reply to act on it.
+    // Stopped by Cody: an FYI, unless the Coordinator was waiting on the reply to act on it. A question for Cody is
+    // never one: it wakes the Coordinator, which files it (in a status-only project the stand-in line is an FYI).
     const { wake } = captainReplyWakes({
       ok: result.ok || Boolean(result.stopped),
       text,
-      fyi: Boolean(result.fyi || result.stopped),
+      fyi: sealed || (question === null && Boolean(result.fyi || result.stopped)),
       coordinatorWaits: this.coordinatorWaits(fromCoordinator.filter((m) => replyTo.includes(m.id))),
       ownerName: this.owner(),
     })
-    this.report(text.slice(0, TOOL_REPLY_MAX), { replyTo, ...(wake ? {} : { fyi: true }) })
+    const filed = question !== null && !sealed ? { ownerQuestion: true } : {}
+    this.report(text.slice(0, TOOL_REPLY_MAX), { replyTo, ...(wake ? {} : { fyi: true }), ...filed })
   }
 
   /**
@@ -1340,8 +1364,25 @@ class Captain {
   private reportAuto(reply: TurnReply) {
     const text = reply.text.trim()
     if (!reply.ok || !text || text === NO_UPDATE) return
+    if (this.ownerQuestionOf(reply) !== null) return this.askOwner(text)
     const { wake } = captainReplyWakes({ ok: true, text, fyi: Boolean(reply.fyi), ownerName: this.owner() })
     this.report(text, wake ? {} : { fyi: true })
+  }
+
+  /** The question for Cody a reply holds (it ended with the owner-question line, shared/ownerQuestions.ts), or null. */
+  private ownerQuestionOf(reply: TurnReply): string | null {
+    const text = reply.ok && reply.ownerQuestion ? reply.text.trim() : ""
+    return text && text !== NO_UPDATE ? text : null
+  }
+
+  /**
+   * A question for Cody that no Coordinator message asked for (an automatic wake-up, Cody's own chat, an agent): it
+   * goes up like an automatic report and always wakes the Coordinator, which files it in Cody's Inbox. A status-only
+   * project's goes straight to the Inbox, and the Coordinator never sees it.
+   */
+  private askOwner(text: string) {
+    if (this.statusOnly()) return this.ownerAsked(text)
+    this.report(text.slice(0, TOOL_REPLY_MAX), { ownerQuestion: true })
   }
 
   /** Tell the manager which notices this turn covered (a notes retro's leftovers are settled then). */
@@ -1466,6 +1507,10 @@ class Captain {
       relayed = true
       if (auto) this.reportAuto(reply)
       else upward?.(reply)
+      // A question for Cody goes up even when the turn answered Cody (who may have left) or an agent. A turn that
+      // answered the Coordinator already took it up (replyUpward).
+      const question = auto || ask.replySource === "coordinator" ? null : this.ownerQuestionOf(reply)
+      if (question !== null) this.askOwner(question)
     }
     ask = { ...ask, onResult: (r) => relay({ ok: true, error: "", ...r }) }
     let now = this.projectNow()
@@ -1791,6 +1836,7 @@ class Captain {
       let raw = ""
       let said = ""
       let fyi = false
+      let ownerQuestion = false
       let sawResult = false
       let resultError: string | null = null
       let settled = false
@@ -1856,8 +1902,11 @@ class Captain {
               .trim(),
           )
           if (marked.fyi) fyi = true
+          // The hidden owner-question line: the reply holds a question for Cody (shared/ownerQuestions.ts).
+          const question = takeOwnerQuestionMarker(marked.text)
+          if (question.asked) ownerQuestion = true
           // The hidden next-step block becomes chips under the reply; reports upward don't carry it.
-          const parsed = parseNextSteps(marked.text)
+          const parsed = parseNextSteps(question.text)
           const text = parsed.content.trim()
           if (text) said = said ? `${said}\n\n${text}` : text
           streamer?.reset()
@@ -1895,7 +1944,7 @@ class Captain {
           // The reply is final at the result line; the CLI takes another 0.4–1 s to exit, so it goes up now.
           else if (kind === "turn") {
             try {
-              ask.onResult?.({ text: said, fyi })
+              ask.onResult?.({ text: said, fyi, ownerQuestion })
             } catch (err) {
               console.error(`[captain ${this.project.id}] couldn't relay the reply at its result:`, err)
             }
@@ -1941,7 +1990,7 @@ class Captain {
         const ok = !err && code === 0 && !resultError && (sawResult || launch.cli === "claude")
         if (kind !== "context") this.recordTiming(clock, { kind, sessionId: seenSession ?? sessionId, model: resultModel, effort, resume, ask, ok, reply, loginId: login?.id ?? null })
         if (login) this.logins()?.ran(login, this.loginHolder, ok)
-        const base = { text: said, raw, sessionId: seenSession, fyi, login }
+        const base = { text: said, raw, sessionId: seenSession, fyi, ownerQuestion, login }
         // A Stop that came after the reply's result line ended a turn that had already finished.
         if (kind === "turn" && this.stopping) return resolve(sawResult && !resultError ? { ...base, ok: true, error: "" } : { ...base, ok: false, stopped: true, error: withOwner(STOPPED_LINE, this.owner()) })
         if (err) return resolve({ ...base, ok: false, error: `Couldn't run ${cliName}: ${err.message}` })

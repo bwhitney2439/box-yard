@@ -852,8 +852,12 @@ export function createBoxYard(
       ? store.addChat("notice", `${who} replied: ${content}`, { projectId, captain: true, replyTo: report.replyTo, ...fyi })
       : store.addChat("notice", `${who}: ${content}`, { projectId, captain: true, ...fyi })
     hub.broadcast({ type: "chat.message", message: msg })
+    // A question for Cody (the owner-question line): it waits for the Coordinator's ask_owner, or the backup files it.
+    if (report.ownerQuestion) ownerQuestions.captainAsked(projectId, content, msg.id)
     if (!report.fyi) orchestrator.nudge()
   }
+  // One with no Coordinator notice: a status-only project's (filed at once), or one an ask_captain result carried.
+  captains.onOwnerQuestion = (projectId, content) => ownerQuestions.captainAsked(projectId, content)
   store.onNotification = (notification) => hub.broadcast({ type: "notification", notification })
   const ownerQuestions = new OwnerQuestions({
     db,
