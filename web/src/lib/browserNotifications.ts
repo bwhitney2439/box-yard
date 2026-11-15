@@ -93,7 +93,8 @@ export function planBrowserNotification(burst: readonly AppNotification[]): Brow
     .map(([s, k]) => `${k} ${COUNT_LABEL[s]}`)
     .join(" · ")
   return {
-    title: `${items.length} tasks need you`,
+    // An Inbox question isn't a task.
+    title: `${items.length} ${items.every((n) => n.taskId) ? "tasks" : "things"} need you`,
     body: [breakdown, lockScreenText(items.map((n) => n.title).join(", "))].join("\n"),
     href: APP_HOME,
     tag: items.map((n) => n.id).sort().join(","),

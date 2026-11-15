@@ -34,7 +34,9 @@ export const OwnerQuestionRows = memo(function OwnerQuestionRows({ questions, cl
   // A new item, or one that left the list, sorts afresh: a question never waits off screen for the list to settle.
   const ids = useMemo(() => questions.map((q) => q.id).join(), [questions])
   const stable = useStableOrder(questions, { key: (q) => q.id, compare: newestFirst, include: (q) => isOpenQuestion(q, closing), resetKey: ids })
-  const shown = stable.entries.filter((e) => !closing.has(e.item.id)).slice(0, limit)
+  // `limit` counts open rows: a dimmed one stays in its place without taking one.
+  let open = 0
+  const shown = stable.entries.filter((e) => !closing.has(e.item.id) && (e.stale || open++ < limit))
   if (!shown.length) return null
   return (
     <div ref={stable.listRef} data-testid="owner-question-rows" className="space-y-px">
@@ -64,17 +66,19 @@ const OwnerQuestionRow = memo(function OwnerQuestionRow({ item, stale, project }
         title={`Captain for ${name} asks: ${line}`}
         className={cx(ROW_BOX, "grid min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)_auto] content-center items-center gap-x-2.5 py-1.5 pointer-coarse:min-h-11")}
       >
-        <MessageCircleQuestion aria-hidden className={cx("h-4 w-4 justify-self-center", stale ? "text-zinc-500" : "text-amber-400")} />
-        <span className="flex min-w-0 items-center gap-1.5 text-sm">
+        <MessageCircleQuestion aria-hidden className={cx("row-start-1 h-4 w-4 justify-self-center", stale ? "text-zinc-500" : "text-amber-400")} />
+        <span className="col-start-2 row-start-1 flex min-w-0 items-center gap-1.5 text-sm">
           {/* The project's square, as under More projects: a round dot would read as a task's state. */}
           <span aria-hidden style={projectColorStyle(project?.color)} className={cx("h-2 w-2 shrink-0 rounded-[2px]", project?.color ? "bg-(--pc)" : "bg-zinc-500")} />
           <span className="min-w-0 truncate">Captain for {name}</span>
           <span className="sr-only">{stale ? `, ${item.state}` : " asks"}: </span>
         </span>
-        <span className="text-xs leading-5 text-zinc-500 tabular-nums @max-[13rem]/side:hidden">
+        <span className="col-span-2 col-start-2 row-start-2 min-w-0 truncate text-xs leading-4 text-zinc-400">{line}</span>
+        {/* After the question to a screen reader; top right to the eye. */}
+        <span className="col-start-3 row-start-1 text-xs leading-5 text-zinc-500 tabular-nums @max-[13rem]/side:hidden">
+          <span className="sr-only">, </span>
           <TimeAgo ts={item.createdAt} />
         </span>
-        <span className="col-span-2 col-start-2 min-w-0 truncate text-xs leading-4 text-zinc-400">{line}</span>
       </button>
     </div>
   )
