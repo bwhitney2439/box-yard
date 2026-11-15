@@ -109,6 +109,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/orchestrator-schedules.test.ts": "Full Box Yard server/task-manager fixture",
   "test/own-cleanup.e2e.test.ts": "End-to-end runner/server integration",
   "test/own-cleanup.test.ts": "Real Git repositories/configuration or archive/bundle operations",
+  "test/owner-questions.e2e.test.ts": "End-to-end runner/server integration",
   "test/placement.e2e.test.ts": "End-to-end runner/server integration",
   "test/pr-assets.test.ts": "Real Git repositories/configuration or archive/bundle operations",
   "test/pr-freshness.e2e.test.ts": "End-to-end runner/server integration",
