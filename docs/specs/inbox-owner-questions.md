@@ -1,6 +1,6 @@
 # Spec: Inbox for Coordinator questions (`ask_owner`)
 
-Status: **draft, for Mutley's OK**. Nothing here is built yet.
+Status: **Approved** (Mutley, 2026-11-15, all A picks). Nothing here is built yet.
 File references (`file:line`) are to `main` at `4096ee6`.
 
 ## 1. The problem
@@ -160,7 +160,7 @@ Then `captains.onReport` in `server/app.ts:843` gets one line: when `report.owne
 **Status-only projects** (`docs/identities.md`): the Coordinator must not see their content. There,
 `captainAsked` files an open item at once (`filed_by = captain`, a plain question) and the reply is not reported
 upward (the `onOwnerQuestion` hook skips it when `identities.statusOnly(projectId)`). Mutley's answer goes straight to
-the Captain. See FOR MUTLEY 4.
+the Captain. See decision 4.
 
 ## 6. The tool: `ask_owner`
 
@@ -173,7 +173,7 @@ coordinatorOnly(registerAskOwner(server, { project, unsealed, owner, ownerQuesti
 
 `coordinatorOnly` (`server/mcp.ts:449`) removes it for Captains, so a Captain can't reach another project. It is
 **not** added to the side threads' read-only `THREAD_TOOLS` (`server/sideThreads.ts:78`): it writes. It is added to
-the Coordinator's `CORE_TOOLS` (`server/mcp.ts:244`) so it's always loaded (FOR MUTLEY 7). `McpDeps`
+the Coordinator's `CORE_TOOLS` (`server/mcp.ts:244`) so it's always loaded (decision 7). `McpDeps`
 (`server/mcp.ts:71`) gets `ownerQuestions?: OwnerQuestions`, passed at `server/app.ts:958`.
 
 **Description** (goes through `withOwner`, like every tool description, via `nameOwnerInTools`):
@@ -291,7 +291,7 @@ My answers to your 2 questions:
 
 A plain item ends with `My answer:` and the typed text instead.
 
-**Dismiss** closes the item and tells both sides quietly, without a turn (FOR MUTLEY 5):
+**Dismiss** closes the item and tells both sides quietly, without a turn (decision 5):
 
 - the Coordinator chat: a `fyi` notice, like `captains.onReport` does (`server/app.ts:847`):
   `📥 **Inbox** dismissed: Cody dismissed the Captain for <project>'s question: <first line>`;
@@ -405,7 +405,7 @@ all of them. Hooks (`task.needs_input`) are task-only and stay so in v1.
 ## 11. The backup
 
 - **What counts as a Captain question**: a Captain reply with the marker (section 5).
-- **Waiting**: `captainAsked` writes a waiting row with `due_at = now + 5 min` (FOR MUTLEY 2).
+- **Waiting**: `captainAsked` writes a waiting row with `due_at = now + 5 min` (decision 2).
 - **Settled** without the backup when, after the row was written, the Coordinator either calls `ask_owner` for that
   project (row → `grouped`) or messages that Captain with `send_to_captain` or `ask_captain` (row → `handled`).
 - **Sweep**: `OwnerQuestions.start()` runs a sweep every 60 s (`setInterval(...).unref()`), and once at start-up so
@@ -457,41 +457,41 @@ All fast (unit and jsdom); none needs a real browser, Git or a full server, so `
 
 Not touched: `runner/box-runner.mjs` and task agents' `ask_user`, hooks, the task Inbox logic in `web/src/lib/inbox.ts`.
 
-## 14. FOR MUTLEY
+## 14. Decisions
 
-Each has at most two options. **A is my pick.**
+Mutley approved the spec on 2026-11-15 and picked A for every choice.
 
 1. **How Box Yard knows a Captain reply is a question for you.**
-   **A.** The Captain ends it with a hidden `<!-- boxyard-owner-question -->` line, as it already does for FYI replies. Exact; a forgetful Captain is caught by the Coordinator reading the reply anyway.
-   B. Reuse the wake heuristic (`mustWake`, `server/captainWake.ts:37`: a "?", "decide", "your call", "needs Cody"). No prompt rule, but "Want me to also…?" would file Inbox items.
+   Decided (Mutley, 2026-11-15): A — the Captain ends the reply with a hidden `<!-- boxyard-owner-question -->` line, like the FYI line.
+   Rejected: B — guess from the reply's wording (`mustWake`, `server/captainWake.ts:37`).
 
 2. **How long a Captain question may wait before the backup files it.**
-   **A.** 5 minutes after the Captain's reply, held while the Coordinator is mid-turn (up to 30 minutes). A Coordinator turn takes seconds, so 5 minutes means it failed or skipped it.
-   B. 15 minutes.
+   Decided (Mutley, 2026-11-15): A — 5 minutes after the Captain's reply, held while the Coordinator is mid-turn (up to 30 minutes).
+   Rejected: B — 15 minutes.
 
 3. **Where your answer to a backup-filed item goes.**
-   **A.** Straight to the Captain, with a quiet note in the Coordinator chat. The backup exists because the Coordinator didn't act; routing back through it could stall again.
-   B. To the Coordinator, like every other item.
+   Decided (Mutley, 2026-11-15): A — straight to the Captain, with a quiet note in the Coordinator chat.
+   Rejected: B — to the Coordinator, like every other item.
 
-4. **Status-only projects** (the Coordinator sees only their status).
-   **A.** The Captain's question goes straight into the Inbox and your answer straight back to the Captain; the Coordinator never sees either. Keeps the status-only promise.
-   B. Same path as other projects. Simpler, but the Coordinator then reads that project's content.
+4. **Status-only projects.**
+   Decided (Mutley, 2026-11-15): A — the question goes from the Captain straight to the Inbox and your answer straight back. The Coordinator sees neither.
+   Rejected: B — the same path as other projects.
 
 5. **What Dismiss tells.**
-   **A.** A quiet note to the Coordinator chat and to the Captain (no wake-up, no turn), so the Captain stops waiting.
-   B. Nothing; the item just goes.
+   Decided (Mutley, 2026-11-15): A — a quiet note to the Coordinator chat and to the Captain (no wake-up, no turn).
+   Rejected: B — tell no one.
 
 6. **Where the answer form opens.**
-   **A.** A bottom sheet over whatever you're looking at (a centred dialog on a big screen), from the Inbox row or a notification.
-   B. A separate Inbox page.
+   Decided (Mutley, 2026-11-15): A — a bottom sheet (a centred dialog on a big screen), from the Inbox row or a notification.
+   Rejected: B — a separate Inbox page.
 
 7. **Is `ask_owner` always loaded for the Coordinator?**
-   **A.** Yes (in `CORE_TOOLS`): it's the main path for Captain questions, and a deferred tool costs a tool-search step before the first call.
-   B. No: deferred like most tools, saving its description's tokens on every turn.
+   Decided (Mutley, 2026-11-15): A — yes, it goes in `CORE_TOOLS`.
+   Rejected: B — loaded only when first needed.
 
 8. **How many projects one item may cover.**
-   **A.** One. The item says which Captain it's for, and the answer goes to one place.
-   B. Several, each question naming its project.
+   Decided (Mutley, 2026-11-15): A — one project per item.
+   Rejected: B — several, each question naming its project.
 
 ## 15. Out of scope for v1
 
