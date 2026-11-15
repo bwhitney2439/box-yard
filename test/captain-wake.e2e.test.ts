@@ -6,6 +6,7 @@ import path from "node:path"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { createBoxYard, type BoxYard } from "../server/app.js"
+import { STATUS_ONLY_OWNER_QUESTION } from "../server/captains.js"
 import { buildMcpServer } from "../server/mcp.js"
 import type { CaptainMessage, ChatMessage, Project } from "../shared/types.js"
 import { freePort, testConfig, waitFor } from "./helpers.js"
@@ -229,4 +230,91 @@ describe("Coordinator wakes on Captain replies", () => {
     await captainIdle(r, p)
     expect(Date.now() - t0 - answered).toBeGreaterThan(1500)
   }, 60_000)
+})
+
+// Inbox questions (docs/specs/inbox-owner-questions.md §5): a Captain reply ending with the owner-question line always
+// reaches the Coordinator, from any turn, and waits there for an Inbox item; a status-only project's goes straight to
+// the Inbox instead.
+describe("a Captain's question for the owner", () => {
+  const QUESTION = "Which database should the spike use?"
+  const reports = (r: Running, p: Project) => r.yard.store.listChat(500).filter((m: ChatMessage) => m.role === "notice" && m.meta?.captain === true && m.meta?.projectId === p.id)
+  const captainSaid = async (r: Running, p: Project) =>
+    (await call<CaptainMessage[]>(r, "GET", `/api/projects/${p.id}/captain/messages`)).filter((m) => m.role === "assistant").map((m) => m.content)
+  /** Cody writes to the project's Captain directly, on its own page. */
+  const toCaptain = (r: Running, p: Project, content: string) => call(r, "POST", `/api/projects/${p.id}/captain/messages`, { content })
+
+  it("wakes the Coordinator even in a reply marked FYI, and waits for an Inbox item", async () => {
+    const r = await start()
+    const p = await call<Project>(r, "POST", "/api/projects", { name: "demo" })
+    const [notice] = await ask(r, [p], "tell captain demo: status [fyi] [ask-owner]")
+    expect(notice!.content).toContain(QUESTION)
+    expect(notice!.content).not.toContain("boxyard-")
+    expect(notice!.meta?.fyi).toBeUndefined()
+    await waitFor(() => wakeTurns(r).length === 1, "the Coordinator's wake", 10_000)
+    await coordinatorIdle(r)
+    expect(coordinatorPrompts(r)[1]).toContain(QUESTION)
+    expect(r.yard.ownerQuestions.waiting(p.id)?.text).toContain(QUESTION)
+    for (const said of await captainSaid(r, p)) expect(said).not.toContain("boxyard-owner-question")
+  }, 60_000)
+
+  it("reaches the Coordinator when the owner asked the Captain directly", async () => {
+    const r = await start()
+    const p = await call<Project>(r, "POST", "/api/projects", { name: "demo" })
+    await toCaptain(r, p, "Plan the spike [ask-owner]")
+    const notice = await waitFor(() => reports(r, p)[0], "the Captain's report", 30_000)
+    expect(notice.content).toMatch(/^Captain for demo: [\s\S]*Which database should the spike use\?/)
+    expect(notice.content).not.toContain("boxyard-")
+    expect(notice.meta?.replyTo).toBeUndefined()
+    expect(notice.meta?.fyi).toBeUndefined()
+    await captainIdle(r, p)
+    await waitFor(() => wakeTurns(r).length === 1, "the Coordinator's wake", 10_000)
+    await coordinatorIdle(r)
+    expect(coordinatorPrompts(r)[0]).toContain(QUESTION)
+    expect(reports(r, p)).toHaveLength(1)
+    expect(r.yard.ownerQuestions.waiting(p.id)?.text).toContain(QUESTION)
+    expect(r.yard.ownerQuestions.listOpen(p.id)).toEqual([])
+    const said = await captainSaid(r, p)
+    expect(said.join("\n")).toContain(QUESTION)
+    for (const text of said) expect(text).not.toContain("boxyard-owner-question")
+  }, 60_000)
+
+  it("leaves a plain reply to the owner in the Captain's chat", async () => {
+    const r = await start()
+    const p = await call<Project>(r, "POST", "/api/projects", { name: "demo" })
+    await toCaptain(r, p, "status")
+    await waitFor(async () => (await captainSaid(r, p)).length > 0 && !(await captainBusy(r, p)), "the Captain's reply", 30_000)
+    await sleep(DEBOUNCE_MS + 300)
+    expect(reports(r, p)).toHaveLength(0)
+    expect(r.yard.ownerQuestions.waiting(p.id)).toBeNull()
+  }, 60_000)
+
+  it("goes straight to the owner's Inbox in a status-only project, and the Coordinator sees none of it", async () => {
+    const r = await start()
+    const p = await call<Project>(r, "POST", "/api/projects", { name: "secret" })
+    r.yard.identities.assign(p.id, r.yard.identities.create({ name: "Private", coordinatorSees: "status" }).id)
+    await toCaptain(r, p, "Plan the spike [ask-owner]")
+    const [item] = await waitFor(() => (r.yard.ownerQuestions.listOpen(p.id).length ? r.yard.ownerQuestions.listOpen(p.id) : null), "the Inbox item", 30_000)
+    expect(item).toMatchObject({ filedBy: "captain", questions: null, text: expect.stringContaining(QUESTION) })
+    expect(item!.text).not.toContain("boxyard-")
+    await captainIdle(r, p)
+    await sleep(DEBOUNCE_MS + 300)
+    expect(reports(r, p)).toHaveLength(0)
+    expect(r.yard.ownerQuestions.waiting(p.id)).toBeNull()
+    expect(wakeTurns(r)).toHaveLength(0)
+    expect(r.yard.store.listChat(500).map((m) => m.content).join("\n")).not.toContain(QUESTION)
+
+    // Asked by the Coordinator, the Captain's question goes to the Inbox too; the Coordinator hears only that.
+    const tool = await coordinatorTools(r)
+    const asked = await tool("ask_captain", { project: "secret", message: "plan it [ask-owner]", timeout_seconds: 30 })
+    expect(asked.reply).toBe(STATUS_ONLY_OWNER_QUESTION.replace(/Cody/g, "the owner"))
+    await captainIdle(r, p)
+    expect(r.yard.ownerQuestions.listOpen(p.id)).toHaveLength(2)
+    await tool("send_to_captain", { project: "secret", message: "and again [ask-owner]" })
+    const notice = await waitFor(() => reports(r, p)[0], "the stand-in reply", 30_000)
+    expect(notice.content).toBe(`Captain for secret replied: ${STATUS_ONLY_OWNER_QUESTION.replace(/Cody/g, "the owner")}`)
+    expect(notice.meta?.fyi).toBe(true)
+    await captainIdle(r, p)
+    expect(r.yard.ownerQuestions.listOpen(p.id)).toHaveLength(3)
+    expect(r.yard.store.listChat(500).map((m) => m.content).join("\n")).not.toContain(QUESTION)
+  }, 90_000)
 })

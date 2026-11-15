@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { CaptainStreamer, visibleReply } from "../shared/captainStream.js"
 import { parseNextSteps } from "../shared/nextSteps.js"
 import { takeFyiMarker } from "../server/captainWake.js"
+import { takeOwnerQuestionMarker } from "../shared/ownerQuestions.js"
 
 /** Feed a reply through the streamer in the given pieces; every text the chat showed along the way, in order. */
 function stream(pieces: string[]): string[] {
@@ -37,7 +38,7 @@ function splits(text: string): string[][] {
 
 /** What the chat stores for the whole reply today (server/captains.ts). */
 function stored(text: string): string {
-  return parseNextSteps(takeFyiMarker(text).text).content.trim()
+  return parseNextSteps(takeOwnerQuestionMarker(takeFyiMarker(text).text).text).content.trim()
 }
 
 const REPLIES = [
@@ -49,6 +50,9 @@ const REPLIES = [
   "Three tasks are working <!-- boxyard-coordinator: fyi --> and one is waiting.",
   "(no update) was the old reply; this one says more.",
   "a < b and c <- d",
+  "Which database should the spike use? I'd pick Postgres.\n\n<!-- boxyard-owner-question -->",
+  "Ship it today? <!-- boxyard-owner-question --> Say so and I'll start the task.",
+  "Pick one: A or B?\n<!--boxyard-owner-question-->\n\n<!-- boxyard-next-steps\n[\"Answer it\"]\n-->",
 ]
 
 describe("visibleReply", () => {
@@ -65,11 +69,14 @@ describe("visibleReply", () => {
   })
 
   it("ends on what the chat stores for the whole reply", () => {
-    for (const reply of REPLIES.filter((r) => !r.includes("coordinator: fyi"))) {
+    for (const reply of REPLIES.filter((r) => !/coordinator: fyi|owner-question --> /.test(r))) {
       expect(visibleReply(reply)).toBe(stored(reply))
     }
     // The FYI marker leaves its spaces behind while streaming; the stored text tidies them.
     expect(visibleReply(REPLIES[2]!)).toBe("Merged #12.")
+    // So does the owner-question line, which never shows either.
+    expect(visibleReply("Ship it today? <!-- boxyard-owner-question --> Say so.")).toBe("Ship it today?  Say so.")
+    expect(visibleReply("Ship it today?\n<!-- boxyard-owner-q")).toBe("Ship it today?")
     expect(visibleReply("(no update)")).toBe("")
     expect(visibleReply("(no update)\n\n<!-- boxyard-next-steps\n[]\n-->")).toBe("")
   })

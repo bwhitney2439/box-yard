@@ -19,6 +19,7 @@
 //   [slow] / [slow:<seconds>]                 (takes 2 s / that long before replying)
 //   [fyi]                                     (a Captain marks its reply to the Coordinator FYI: no wake needed)
 //   [decide]                                  (a Captain's reply ends with a decision for Cody)
+//   [ask-owner]                               (a Captain's reply ends with a question for Cody and the owner-question line)
 //   [fail]                                    (a Captain's turn fails)
 //   [code]                                    (a Captain's code question: repo_clone, then Read and Grep README.md, try to
 //                                              Write NEW.md, Edit README.md and Bash `git push` in the clone, each as the run's
@@ -625,6 +626,7 @@ async function orchestrator(mcp, prompt) {
   }
   if (captain && /\[fail\]/i.test(text)) throw new Error("fake Captain failure")
   if (captain && /\[decide\]/i.test(text)) lines.push("", "The owner needs to decide: merge PR #1 now, or after the release.")
+  if (captain && /\[ask-owner\]/i.test(text)) lines.push("", "Which database should the spike use? I'd pick Postgres; the other option is SQLite.", "", "<!-- boxyard-owner-question -->")
   // A Captain's reply that's only for Cody's information says so, so it doesn't wake the Coordinator.
   const fyi = captain && /\[fyi\]/i.test(text) ? "\n\n<!-- boxyard-coordinator: fyi -->" : ""
   await say(withNextSteps(lines.join("\n") + fyi, ["Check the latest yard status", "Start a related task", "Summarize open decisions"]))
