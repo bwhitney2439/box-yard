@@ -12,8 +12,11 @@ import { Fragment, createContext, memo, useCallback, useContext, useEffect, useI
 import { Link } from "wouter"
 import { AlarmClock, BarChart3, Check, ChevronDown, ChevronRight, FolderPlus, Inbox, Keyboard, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Plus, Settings as SettingsIcon } from "lucide-react"
 import type { Task } from "../../../shared/types"
+import type { OwnerQuestion } from "../../../shared/ownerQuestions"
 import { useCaptainState, useCoordinatorStatus, useProjects, useTasks } from "../lib/queries"
 import { inInbox, usePendingCloses } from "../lib/inbox"
+import { useOpenOwnerQuestions, useOwnerQuestions } from "../lib/ownerQuestions"
+import { OwnerQuestionRows } from "./OwnerQuestionRows"
 import { useMarkDone } from "../lib/markDone"
 import { readyForReview } from "../lib/taskActions"
 import { pinProject, unpinProject, useBarPins, useChatProjectFilter } from "../lib/projectBar"
@@ -91,13 +94,13 @@ import { prCommentsLabel } from "../../../shared/prComments"
  * Keyboard focus: a white outline inside the row and no fill, so it's never mistaken for the selected row (or a hover).
  * `!`: the app's own focus ring (styles.css, gold and outside the box) is unlayered, so it beats a plain utility.
  */
-const FOCUS = "focus-visible:outline-2! focus-visible:-outline-offset-2! focus-visible:outline-zinc-100!"
+export const FOCUS = "focus-visible:outline-2! focus-visible:-outline-offset-2! focus-visible:outline-zinc-100!"
 /** The one selected row: a fill and a yellow bar on its left edge. Hover is a fainter fill and no bar. */
 const SELECTED = "bg-zinc-800 text-zinc-50 shadow-[inset_3px_0_0_var(--color-yard-400)]"
 /** A folded group holding the selected task: the bar, faint, and no fill. */
 const INSIDE = "shadow-[inset_3px_0_0_color-mix(in_oklab,var(--color-yard-400)_40%,transparent)]"
 /** One row's box, without its layout: 36px to a mouse, 44px to a finger. */
-const ROW_BOX = cx("w-full min-h-9 rounded-lg px-2 text-left text-sm transition pointer-coarse:min-h-11", FOCUS)
+export const ROW_BOX = cx("w-full min-h-9 rounded-lg px-2 text-left text-sm transition pointer-coarse:min-h-11", FOCUS)
 const ROW = cx("flex items-center gap-2.5", ROW_BOX)
 /**
  * A footer button: an icon to a mouse, as ICON_BUTTON; to a finger, which has no tooltip, the icon over its name in one
@@ -138,7 +141,7 @@ const InTree = createContext(false)
  * page on screen, its open button's id, which names it, and whether it has an action for Shift+Enter (Mark done). The tree writes its place among its siblings and the tab
  * stop.
  */
-function treeItem(key: string, level: number, label: string, { expanded, current, action }: { expanded?: boolean | null; current?: boolean; action?: boolean } = {}) {
+export function treeItem(key: string, level: number, label: string, { expanded, current, action }: { expanded?: boolean | null; current?: boolean; action?: boolean } = {}) {
   return {
     role: "treeitem",
     "data-tree-key": key,
@@ -151,7 +154,7 @@ function treeItem(key: string, level: number, label: string, { expanded, current
   }
 }
 /** A treeitem's open button: what Enter clicks, and the row's name. Out of the Tab order, as is every button in a row. */
-const openPart = (id: string) => ({ id, tabIndex: -1, [TREE_OPEN]: "" })
+export const openPart = (id: string) => ({ id, tabIndex: -1, [TREE_OPEN]: "" })
 /** A treeitem's chevron: what →, ← and Space click. */
 const TOGGLE_PART = { tabIndex: -1, [TREE_TOGGLE]: "" }
 /** "Waiting on you" and More projects: their head only folds, so Enter and the arrows click the same button. */
@@ -186,16 +189,18 @@ function useKept<T>(value: T, keep: (prev: T | undefined, next: T) => T): T {
 function useInboxCount() {
   const tasks = useTasks()
   const closing = usePendingCloses()
+  // A Captain's questions for Cody (OwnerQuestionRows) count, and ask.
+  const questions = useOpenOwnerQuestions().length
   return useMemo(() => {
-    let count = 0
-    let asks = false
+    let count = questions
+    let asks = questions > 0
     for (const t of tasks.data ?? []) {
       if (!inInbox(t, closing)) continue
       count++
       if (t.status === "needs_input") asks = true
     }
     return { count, asks }
-  }, [tasks.data, closing])
+  }, [tasks.data, closing, questions])
 }
 
 /** A count. `asks`: on the asks dot's amber (CUE_DOT), with dark figures in either theme (the light one turns zinc over). */
@@ -420,7 +425,11 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     useMemo(() => inboxRows(tasks.data ?? [], (t) => inInbox(t, closing)), [tasks.data, closing]),
     keepRows,
   )
-  const waiting = useMemo(() => cappedRows(waitingAll, { expanded: allWaiting, keep: openTask }), [waitingAll, allWaiting, openTask])
+  // Question rows lead the list and take their places under its cap first.
+  const questions = useOwnerQuestions().data ?? NO_QUESTIONS
+  const asked = useOpenOwnerQuestions().length
+  const questionsShown = allWaiting ? asked : Math.min(asked, WAITING_CAP)
+  const waiting = useMemo(() => cappedRows(waitingAll, { expanded: allWaiting, keep: openTask, cap: WAITING_CAP - questionsShown }), [waitingAll, allWaiting, openTask, questionsShown])
   /** "Show all n" and "Show fewer". Back to the first few, the list starts over: it's much shorter than where Cody was. */
   const expandWaiting = useCallback((all: boolean) => {
     setAllWaiting(all)
@@ -672,8 +681,11 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
           <div ref={list} className={cx("scroll-thin min-h-0 flex-1 overflow-y-auto px-2", empty !== "none" && "pb-3")}>
             <WaitingOnYou
               rows={waiting.shown}
-              total={waitingAll.length}
-              hidden={waiting.hidden}
+              questions={questions}
+              questionsShown={questionsShown}
+              closing={closing}
+              total={waitingAll.length + asked}
+              hidden={waiting.hidden + asked - questionsShown}
               mixed={waitingMixed}
               asks={inbox.asks}
               folded={Boolean(folds[WAITING_FOLD])}
@@ -1411,8 +1423,12 @@ const WAITING_STUCK = "sticky top-0 z-10 rounded-b-none border-b border-amber-30
  * projects under it are never a long scroll away. `mixed`: its tasks are from more than one project, so each run of
  * rows from one project sits under that project's name.
  */
-const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, asks, folded, expanded, onExpand, selection, onPick }: {
+const WaitingOnYou = memo(function WaitingOnYou({ rows, questions, questionsShown, closing, total, hidden, mixed, asks, folded, expanded, onExpand, selection, onPick }: {
   rows: SidebarRow[]
+  /** A Captain's questions for Cody, first, `questionsShown` of them (OwnerQuestionRows). */
+  questions: readonly OwnerQuestion[]
+  questionsShown: number
+  closing: ReadonlySet<string>
   total: number
   hidden: number
   mixed: boolean
@@ -1466,6 +1482,7 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
       </div>
       {!folded && (
         <div role="group" aria-label="Waiting on you" className="space-y-px px-1 pb-1">
+          <OwnerQuestionRows questions={questions} closing={closing} limit={questionsShown} projects={lines} />
           {rows.map((r, i) => {
             const project = lines.get(r.task.projectId) ?? NO_PROJECT
             return (
@@ -1498,6 +1515,7 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
 })
 
 const NO_PROJECT = { name: "", color: undefined }
+const NO_QUESTIONS: OwnerQuestion[] = []
 
 /** The sidebar's empty states: what happened, then the one thing to do about it. */
 const EMPTY = "px-2 pt-4 text-xs leading-relaxed text-zinc-500"
