@@ -24,6 +24,8 @@
 //   [code]                                    (a Captain's code question: repo_clone, then Read and Grep README.md, try to
 //                                              Write NEW.md, Edit README.md and Bash `git push` in the clone, each as the run's
 //                                              flags allow: see fileTool; the reply says what each did)
+// FAKE_CLAUDE_ASK_OWNER=1 makes the Coordinator file a Captain's [ask-owner] question with ask_owner and pass Cody's
+// Inbox answer on with send_to_captain (inboxQuestions).
 // FAKE_CLAUDE_EXIT_MS=<ms> waits that long between the result line and exiting, like the real CLI's exit tail.
 // Replies stream word by word, 15 ms apart; FAKE_CLAUDE_WORD_MS=<ms> slows that down (a long reply to type over).
 // A Captain answers an agent's message_captain ("[From task … (task_…), an agent …]") when the message has
@@ -599,6 +601,7 @@ async function orchestrator(mcp, prompt) {
     }
   }
   const captain = prompt.includes("[Project now: ")
+  if (!captain && process.env.FAKE_CLAUDE_ASK_OWNER === "1") lines.push(...(await inboxQuestions(mcp, prompt)))
   if (captain && /\[code\]/i.test(text)) lines.push(...(await codeQuestion(mcp)))
   if (!lines.length && named) {
     lines.push(`Here's what you asked about:\n${named[1].trim()}`)
@@ -631,6 +634,35 @@ async function orchestrator(mcp, prompt) {
   const fyi = captain && /\[fyi\]/i.test(text) ? "\n\n<!-- boxyard-coordinator: fyi -->" : ""
   await say(withNextSteps(lines.join("\n") + fyi, ["Check the latest yard status", "Start a related task", "Summarize open decisions"]))
   return lines.join("\n")
+}
+
+/**
+ * FAKE_CLAUDE_ASK_OWNER=1: the Coordinator files a Captain's [ask-owner] question in Cody's Inbox (ask_owner, one call
+ * per project, with a default and the other option), and passes Cody's "[Inbox answer oq_…]" on with send_to_captain,
+ * as ORCHESTRATOR_PROMPT tells a model to.
+ */
+async function inboxQuestions(mcp, prompt) {
+  const lines = []
+  const reportRe = /^- Captain for ([\w .-]+?)(?: replied)?: ([\s\S]*?)(?=\n- |(?![\s\S]))/gm
+  const filed = new Set()
+  let m
+  while ((m = reportRe.exec(prompt))) {
+    const project = m[1].trim()
+    if (filed.has(project) || !m[2].includes("Which database should the spike use?")) continue
+    filed.add(project)
+    const r = await useTool(mcp, "ask_owner", {
+      project,
+      question: `The Captain for ${project} is planning the spike.`,
+      questions: [{ question: "Which database should the spike use?", default_answer: "Postgres", options: ["SQLite"] }],
+    })
+    lines.push(`It's in your Inbox: the Captain for ${project}'s database question.`, "```json", r.slice(0, 400), "```")
+  }
+  const answerRe = /^\[Inbox answer (oq_[\w-]+) · Captain for "[^"]*" \(([\w-]+)\)\]\n[^\n]*\n\n([\s\S]*)$/m
+  if ((m = prompt.match(answerRe))) {
+    const r = await useTool(mcp, "send_to_captain", { project: m[2], message: `Cody answered from the Inbox (${m[1]}):\n\n${m[3].trim()}` })
+    lines.push(`Passed ${m[1]} on to the Captain.`, "```json", r.slice(0, 300), "```")
+  }
+  return lines
 }
 
 async function worker(mcp, prompt) {
