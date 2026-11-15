@@ -123,6 +123,15 @@ describe("parseNotice", () => {
     expect(n).toEqual({ kind: "settings", title: "Settings", summary: [{ text: "maxBoxes 5 → 20, slotsPerBox 2 → 3. Reason: Cody asked for more boxes" }], truncated: false })
   })
 
+  it("reads the Inbox question notices (filed, answered, dismissed) as updates", () => {
+    const filed = parseNotice("📥 **Inbox** filed: the Captain for box-yard's question waited 5 minutes with no Inbox item, so Box Yard put it in the Inbox.")
+    expect(filed).toEqual({ kind: "message", title: "Inbox", summary: [{ text: "the Captain for box-yard's question waited 5 minutes with no Inbox item, so Box Yard put it in the Inbox." }], truncated: false })
+    expect(parseNotice("📥 **Inbox** answered: Cody answered the Captain for box-yard's question; it went to the Captain.").kind).toBe("message")
+    const dismissed = parseNotice("📥 **Inbox** dismissed: Cody dismissed your question: Which database?")
+    expect(dismissed.kind).toBe("message")
+    expect(dismissed.title).toBe("Inbox")
+  })
+
   it("drops an empty status detail instead of showing a dangling colon", () => {
     expect(parseNotice("✅ **A** is done: ").summary).toEqual([{ text: "is done" }])
   })
