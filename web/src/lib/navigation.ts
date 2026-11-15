@@ -8,6 +8,7 @@ import { COORDINATOR_CHAT, closeThread } from "./threads"
 import { chatProjectFilter, pickProject, pinProject, setChatProjectFilter } from "./projectBar"
 import { parseSection, SETTINGS_PARAM } from "./settingsNav"
 import { withoutFormerHome } from "../../../shared/formerHome"
+import { ASK_PARAM, openOwnerQuestion } from "./ownerQuestions"
 
 export const APP_HOME = "/"
 export const taskCardHref = (id: string) => `${APP_HOME}?task=${encodeURIComponent(id)}`
@@ -36,7 +37,8 @@ export function appHref(href: string, origin = "http://boxyard.local"): string |
   } else if (/^\/schedules\/?$/.test(url.pathname)) params.set("schedule", decodeId(url.hash.slice(1)) || "all")
   else if (url.pathname === APP_HOME) {
     // "usage": the Usage modal's range (components/UsageHost.tsx).
-    for (const key of ["task", "project", ...OVERLAY_PARAMS, STACK_PARAM, "projectSettings", "preview", "usage"]) {
+    // "ask": an Inbox question's answer sheet (lib/ownerQuestions.ts).
+    for (const key of ["task", "project", ...OVERLAY_PARAMS, STACK_PARAM, "projectSettings", "preview", "usage", ASK_PARAM]) {
       const value = url.searchParams.get(key)
       if (value) params.set(key, value)
     }
@@ -95,6 +97,9 @@ export function appAroundNav(nav: Navigate, to: string, options?: Options): void
   const query = new URL(next, location.origin).searchParams
   const project = query.get("project")
   if (project && query.size === 1) return openChat(project)
+  // A link to an Inbox question (its notification) opens its sheet over whatever is open.
+  const ask = query.get(ASK_PARAM)
+  if (ask && query.size === 1) return openOwnerQuestion(ask)
   revealDestination(next) // Repeated clicks on the same project still pick its Captain.
   nav(next, options)
 }

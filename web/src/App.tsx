@@ -16,6 +16,7 @@ import { Toasts } from "./components/Toasts"
 import { NotificationEffects } from "./components/NotificationEffects"
 import { SettingsHost } from "./components/SettingsHost"
 import { UsageHost } from "./components/UsageHost"
+import { OwnerQuestionSheet } from "./components/OwnerQuestionSheet"
 import { ConfirmHost } from "./components/ConfirmDialog"
 import { FilePreviewHost } from "./components/FilePreview"
 import { LightboxHost } from "./components/Lightbox"
@@ -171,6 +172,7 @@ export function App() {
       <ShortcutsHost />
       <SettingsHost />
       <UsageHost />
+      <OwnerQuestionSheet />
       <ProjectSettingsHost />
       <ConfirmHost />
       <FilePreviewHost />
