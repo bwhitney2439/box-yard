@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useNotifications, useTasks } from "../lib/queries"
 import { markRead, viewingTaskId } from "../lib/notifications"
 import { inInbox, usePendingCloses } from "../lib/inbox"
+import { useOpenOwnerQuestions } from "../lib/ownerQuestions"
 import { browserNotificationsOn, listenForNotificationClicks, registerNotificationWorker } from "../lib/browserNotifications"
 import { navigateApp } from "../lib/navigation"
 
@@ -24,7 +25,8 @@ export function NotificationEffects() {
   const tasks = useTasks()
   const closing = usePendingCloses()
   const visible = useSyncExternalStore(subscribeVisibility, isVisible)
-  const waiting = tasks.data?.filter((t) => inInbox(t, closing)).length ?? 0
+  // A Captain's open questions for Cody count too (OwnerQuestionRows).
+  const waiting = (tasks.data?.filter((t) => inInbox(t, closing)).length ?? 0) + useOpenOwnerQuestions().length
 
   useEffect(() => {
     document.title = waiting ? `(${waiting}) Box Yard` : "Box Yard"

@@ -101,6 +101,7 @@ export function usePendingCloses(): ReadonlySet<string> {
 
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", () =>
-    flushCloses((taskId) => void fetch(`/api/tasks/${taskId}/close`, { method: "POST", keepalive: true, credentials: "same-origin" }).catch(() => {})),
+    // An Inbox question's Dismiss (lib/ownerQuestions.ts) waits in the same window, keyed by its oq_ id.
+    flushCloses((id) => void fetch(id.startsWith("oq_") ? `/api/owner-questions/${id}/dismiss` : `/api/tasks/${id}/close`, { method: "POST", keepalive: true, credentials: "same-origin" }).catch(() => {})),
   )
 }

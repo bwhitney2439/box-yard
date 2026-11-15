@@ -14,6 +14,7 @@ import { loadTtsInfo, setTtsInfo } from "./tts"
 import { onResume } from "./resume"
 import { reportOnline, reportStream, setReconnectHandler } from "./connection"
 import { applyThreadEvent } from "./threads"
+import { applyOwnerQuestion } from "./ownerQuestions"
 import { staleAfterClose } from "./closedTasks"
 import { staleAfterStop } from "./stoppedTasks"
 import { liveMessage, liveState } from "./liveQueries"
@@ -356,6 +357,9 @@ export function useServerEvents(enabled: boolean): Connection {
           break
         case "schedule.run":
           qc.setQueryData<ScheduleRun[]>(keys.scheduleRuns, (list) => (list ? upsert(list, ev.run, true) : list))
+          break
+        case "owner.question":
+          applyOwnerQuestion(qc, ev.question)
           break
         case "notification":
           receiveNotification(qc, ev.notification)

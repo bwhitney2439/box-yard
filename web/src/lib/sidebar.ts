@@ -290,9 +290,11 @@ export function railInitials(projects: readonly { id: string; name: string }[]):
  * asked for them, then each project's together (byProject). The open task (`keep`) always stays, so the row drawn
  * selected is never one hidden behind "Show all n".
  */
-export function cappedRows(rows: readonly SidebarRow[], opts: { expanded: boolean; keep?: string | null }): { shown: SidebarRow[]; hidden: number } {
-  if (opts.expanded || rows.length <= WAITING_CAP) return { shown: byProject(rows), hidden: 0 }
-  const shown = rows.filter((r, i) => i < WAITING_CAP || r.task.id === opts.keep)
+export function cappedRows(rows: readonly SidebarRow[], opts: { expanded: boolean; keep?: string | null; cap?: number }): { shown: SidebarRow[]; hidden: number } {
+  // `cap`: fewer when the Inbox's questions (OwnerQuestionRows) took places above the tasks.
+  const cap = Math.max(0, opts.cap ?? WAITING_CAP)
+  if (opts.expanded || rows.length <= cap) return { shown: byProject(rows), hidden: 0 }
+  const shown = rows.filter((r, i) => i < cap || r.task.id === opts.keep)
   return { shown: byProject(shown), hidden: rows.length - shown.length }
 }
 

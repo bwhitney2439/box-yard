@@ -136,6 +136,22 @@ describe("which notifications reach the system", () => {
     expect(planBrowserNotification([note("n4", "task_d", "failed", { summary: "Stopped before it started." })])?.body).toBe("Failed · site\nStopped before it started")
   })
 
+  it("an Inbox question for Cody (no task, needs input): keyed and linked by its href", () => {
+    const ask = note("n9", null, "needs_input", { title: "Captain for site asks", summary: "Postgres or SQLite?", href: "/?ask=oq_7k2m9x1p4q5r" })
+    expect(planBrowserNotification([ask])).toEqual({
+      title: "Captain for site asks",
+      body: "Needs your input · site\nPostgres or SQLite?",
+      href: "/?ask=oq_7k2m9x1p4q5r",
+      tag: "n9",
+      taskId: null,
+    })
+    // Two questions are two items, beside a task's.
+    const two = planBrowserNotification([ask, note("n10", null, "needs_input", { createdAt: 2, href: "/?ask=oq_second000001" }), note("n11", "task_a", "failed", { createdAt: 3 })])
+    expect(two?.title).toBe("3 things need you")
+    // A box's notification has an href too, and stays in-app.
+    expect(planBrowserNotification([note("n12", null, "failed", { boxId: "box_1", href: "/boxes#box_1" })])).toBeNull()
+  })
+
   it("never done, idle, box, read or already-settled ones", () => {
     expect(planBrowserNotification([note("n1", "a", "done"), note("n2", "b", "idle")])).toBeNull()
     expect(planBrowserNotification([note("n1", null, "failed", { boxId: "box_1" })])).toBeNull()

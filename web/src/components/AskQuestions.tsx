@@ -46,6 +46,8 @@ export const AskQuestions = memo(function AskQuestions({
   questions,
   askedAt,
   settled = true,
+  submit: sender,
+  label = "The agent asks",
 }: {
   taskId: string
   /** The task's question: the text version of the ask, which starts with the agent's intro if it gave one. */
@@ -58,6 +60,10 @@ export const AskQuestions = memo(function AskQuestions({
    * its messages arrive counted them as new ("6 new messages").
    */
   settled?: boolean
+  /** Send through this instead of the task's answers route, and leave the focus be (an Inbox question's sheet). */
+  submit?: { send: (key: string, answers: string[]) => Promise<unknown>; pending: boolean }
+  /** The header's words, and the card's name. */
+  label?: string
 }) {
   const key = useMemo(() => askKey(questions), [questions])
   const intro = useMemo(() => questionsIntro(question, questions), [question, questions])
@@ -74,7 +80,8 @@ export const AskQuestions = memo(function AskQuestions({
     setProgressState(next)
   }, [id])
 
-  const answer = useAnswerQuestions(taskId)
+  const taskAnswer = useAnswerQuestions(taskId)
+  const answer = sender ? { isPending: sender.pending, mutateAsync: (a: { key: string; answers: string[] }) => sender.send(a.key, a.answers) } : taskAnswer
   const [error, setError] = useState<string | null>(null)
   const total = questions.length
   const step = Math.min(progress.step, total - 1)
@@ -179,7 +186,7 @@ export const AskQuestions = memo(function AskQuestions({
     sending.then(
       () => {
         dropAskProgress(id)
-        focusComposer(taskId)
+        if (!sender) focusComposer(taskId)
       },
       (err: Error) => setError(err instanceof ApiError && err.status === 409 ? "These questions were answered or replaced meanwhile." : `Couldn't send the answers: ${err.message}`),
     )
@@ -211,11 +218,11 @@ export const AskQuestions = memo(function AskQuestions({
   }
 
   return (
-    <div ref={setCard} role="group" aria-label="The agent asks" data-testid="pending-ask" data-questions={total} className={cx(ASK_CARD, "scroll-mt-2")}>
+    <div ref={setCard} role="group" aria-label={label} data-testid="pending-ask" data-questions={total} className={cx(ASK_CARD, "scroll-mt-2")}>
       <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" box="h-7!" />
       <div className="@container/ask min-w-0 flex-1">
         <div className="flex h-7 min-w-0 items-center gap-2 text-[11px] font-semibold text-amber-400">
-          <span className="shrink-0">The agent asks</span>
+          <span className="shrink-0">{label}</span>
           {askedAt !== null && (
             <span className="shrink-0 font-normal text-zinc-400 @max-[15rem]/ask:hidden">
               <TimeAgo ts={askedAt} />
