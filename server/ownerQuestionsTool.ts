@@ -19,7 +19,7 @@ export interface AskOwnerHelpers {
   ownerQuestions?: OwnerQuestions
 }
 
-// The description and parameter descriptions say "Cody": nameOwnerInTools (server/mcp.ts) puts the owner's name in.
+// The description and top-level parameter descriptions say "Cody": nameOwnerInTools (server/mcp.ts) puts the owner's name in.
 export const ASK_OWNER_DESCRIPTION =
   "Coordinator tool: put a Captain's question for Cody in Cody's Inbox, as a form with your recommended answer and the " +
   "other options for each question. Use it for every question or decision only Cody can make that a Captain sent you, " +
@@ -47,7 +47,8 @@ export function registerAskOwner(server: McpServer, h: AskOwnerHelpers): Registe
             z.object({
               question: z.string().describe("The question, in Markdown"),
               default_answer: z.string().describe("Your recommended answer, pre-selected"),
-              options: z.array(z.string()).max(MAX_OPTIONS).optional().describe("The other answers worth offering. Cody can always type their own."),
+              // Nested, so nameOwnerInTools doesn't reach it.
+              options: z.array(z.string()).max(MAX_OPTIONS).optional().describe(h.owner("The other answers worth offering. Cody can always type their own.")),
             }),
           )
           .min(1)
@@ -56,7 +57,7 @@ export function registerAskOwner(server: McpServer, h: AskOwnerHelpers): Registe
     },
     async (a: Args) => {
       try {
-        if (!h.ownerQuestions) return text("Cody's Inbox questions are not available in this Box Yard process.", true)
+        if (!h.ownerQuestions) return text(h.owner("Cody's Inbox questions are not available in this Box Yard process."), true)
         const p = h.project(a.project)
         // A status-only project's Captain files its own questions and gets the answer straight back: the Coordinator
         // never sees them (decision 4), so it can't file one for it either.
