@@ -1,15 +1,16 @@
 // What of a Captain's reply may show in its chat while it is still being written (Settings › Coordinator › Stream
 // Captain replies). The stored reply is unchanged: it is still made from the whole message once it's written
-// (server/captains.ts: takeFyiMarker, then parseNextSteps). The live text only ever holds back more than that:
+// (server/captains.ts: takeFyiMarker and takeOwnerQuestionMarker, then parseNextSteps). The live text only ever holds back more than that:
 //   - a bare "(no update)", which is never shown, while the reply could still be one;
-//   - Box Yard's hidden blocks, `<!-- boxyard-… -->` (the next steps, the Coordinator FYI line) and a fenced
+//   - Box Yard's hidden blocks, `<!-- boxyard-… -->` (the next steps, the Coordinator FYI line, the owner-question line) and a fenced
 //     ```boxyard-next-steps block, from their first character, even when they arrive split across chunks.
 // Anything held back while it could still turn out to be one of those shows as soon as it can't.
 
 /** A Captain's whole reply when it has nothing to report: never shown (server/captains.ts NO_UPDATE). */
 export const CAPTAIN_NO_UPDATE = "(no update)"
 
-const FYI_MARKER = /<!--\s*boxyard-coordinator:\s*fyi\s*-->/gi
+/** The hidden lines a whole reply drops (the Coordinator FYI line, the owner-question line), wherever they are. */
+const HIDDEN_MARKERS = /<!--\s*(?:boxyard-coordinator:\s*fyi|boxyard-owner-question)\s*-->/gi
 const HIDDEN_NAME = "boxyard-"
 const FENCED_NAME = "boxyard-next-steps"
 
@@ -51,7 +52,7 @@ function holdFrom(text: string): number {
 
 /** The part of a reply written so far that may show now (see the top of this file). */
 export function visibleReply(written: string): string {
-  const text = written.replace(FYI_MARKER, "")
+  const text = written.replace(HIDDEN_MARKERS, "")
   const shown = text.slice(0, holdFrom(text)).replace(/^\s+/, "").trimEnd()
   // "(no update)" so far, or exactly: it may be the whole reply, which never shows.
   if (CAPTAIN_NO_UPDATE.startsWith(shown)) return ""
