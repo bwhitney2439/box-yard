@@ -4330,12 +4330,12 @@ export class Store {
   }
 
   /** A notification about a box, not a task (e.g. a resize the Coordinator made). */
-  addBoxNotification(input: { boxId: string; title: string; summary: string; status: "done" | "failed"; projectId?: string; projectName?: string; href?: string }): AppNotification {
+  addBoxNotification(input: { boxId?: string; title: string; summary: string; status: "done" | "failed" | "needs_input"; projectId?: string; projectName?: string; href?: string }): AppNotification {
     const n: AppNotification = {
       id: newId("ntf"),
       taskId: null,
-      boxId: input.boxId,
-      href: input.href ?? `/boxes#${input.boxId}`,
+      boxId: input.boxId ?? null,
+      href: input.href ?? (input.boxId ? `/boxes#${input.boxId}` : null),
       projectId: input.projectId ?? "",
       title: input.title,
       projectName: input.projectName ?? "",
