@@ -370,6 +370,11 @@ describe("status-only guidance in the prompts", () => {
     expect(sealedCaptain).toMatch(/Status only: Ada set this project's identity to show the Coordinator its status only/)
     expect(sealedCaptain).toMatch(/report the state of the work[\s\S]*not its content/)
     expect(captainPrompt(r.open, "Ada")).not.toMatch(/Status only/)
+    // Its questions for the owner skip the Coordinator.
+    expect(sealedCaptain).toContain(
+      "Ada and this project's agents still see everything here. In this project a reply with the owner-question line goes straight to Ada's Inbox, not to the Coordinator, and Ada's answer comes straight back to you.",
+    )
+    expect(captainPrompt(r.open, "Ada")).not.toContain("goes straight to Ada's Inbox")
     const coordinator = withOwner(ORCHESTRATOR_PROMPT, "Ada")
     expect(coordinator).toMatch(/Some projects show you their status only[\s\S]*Ask that project's Captain \(ask_captain\)/)
     expect(coordinator).toMatch(/only Ada sets it back to everything/)
