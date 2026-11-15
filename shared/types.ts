@@ -23,6 +23,7 @@ import type { TaskPriority } from "./priority.js"
 import type { ProjectGpuMachine, RunPodImageBuild } from "./runpod.js"
 import type { DockerImageBuild, ProjectDocker } from "./docker.js"
 import type { UpdateStatus } from "./selfUpdate.js"
+import type { OwnerQuestion } from "./ownerQuestions.js"
 export type { TaskOutcome } from "./quiet.js"
 export type { BoxCleanup } from "./disk.js"
 export type { BoxResize, ResizePlan, ResizeInitiator, ResizeMode, ResizeStep, DiskFit } from "./boxSizes.js"
@@ -750,6 +751,8 @@ export type UiEvent =
   | { type: "hook"; hook: Hook }
   | { type: "hook.deleted"; hookId: string }
   | { type: "hook.run"; run: HookRun }
+  /** An Inbox question was filed, answered or dismissed (server/ownerQuestions.ts): open ones show, closed ones go. */
+  | { type: "owner.question"; question: OwnerQuestion }
 
 /** Task statuses that are worth telling Cody about when a task lands in them. */
 export const NOTIFY_STATUSES = ["done", "pr_ready", "needs_input", "failed", "idle"] as const

@@ -1324,6 +1324,36 @@ export const MIGRATIONS: string[] = [
   );
   ALTER TABLE tasks ADD COLUMN pr_new_comments INTEGER;
   `,
+  `
+  -- Questions for Cody from a project's Captain (docs/specs/inbox-owner-questions.md, server/ownerQuestions.ts).
+  -- state: waiting (a Captain asked, no Inbox item yet: the backup's clock runs, due_at), open (in the Inbox),
+  -- answered, dismissed, grouped (a waiting row an ask_owner item took over: grouped_into), handled (a waiting row
+  -- the Coordinator settled itself with send_to_captain or ask_captain).
+  -- filed_by: coordinator (ask_owner), backup (Box Yard, after due_at), captain (a status-only project's Captain,
+  -- filed straight away). NULL while waiting.
+  -- questions_json: AskQuestion[] (shared/askQuestions.ts); NULL for a plain question (backup or captain filing),
+  -- whose text is the Captain's own words.
+  -- answers_json: {"answers": string[], "messageId": string | null}, the answer and the client's message id it came
+  -- with (a retried send of the same answer gets the item back instead of a conflict).
+  CREATE TABLE owner_questions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    filed_by TEXT,
+    intro TEXT,
+    questions_json TEXT,
+    text TEXT NOT NULL,
+    captain_text TEXT,
+    captain_message_id TEXT,
+    grouped_into TEXT,
+    answers_json TEXT,
+    due_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    closed_at INTEGER
+  );
+  CREATE INDEX owner_questions_open ON owner_questions(state, project_id);
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {
