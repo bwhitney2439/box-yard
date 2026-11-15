@@ -53,6 +53,7 @@ import { compactionTime, findCompactionRecord } from "./compactions.js"
 import { CompactionIndex, FULL_CHUNK_MAX } from "./compactionIndex.js"
 import type { Identities } from "./identity/identities.js"
 import type { OwnerQuestions } from "./ownerQuestions.js"
+import { registerAskOwner } from "./ownerQuestionsTool.js"
 import { IdentityDetector } from "./identity/detect.js"
 import { applyRefs, assignChecked, createWithRefs, detectFor, importDetected, testRepos, type IdentityRefs } from "./identity/setup.js"
 import { redact } from "./credentials.js"
@@ -244,7 +245,7 @@ function nameOwnerInTools(server: McpServer, ownerName: string | undefined) {
  * stay out of every turn's context. A new tool is deferred unless it's added here.
  */
 export const CORE_TOOLS: Record<McpCaller["kind"], ReadonlySet<string>> = {
-  coordinator: new Set(["send_to_captain", "ask_captain", "list_projects", "list_tasks", "get_task", "send_to_task", "wait_for_tasks", "list_inbox", "search_history"]),
+  coordinator: new Set(["send_to_captain", "ask_captain", "list_projects", "list_tasks", "get_task", "send_to_task", "wait_for_tasks", "list_inbox", "ask_owner", "search_history"]),
   captain: new Set(["create_task", "create_tasks", "send_to_task", "reply_to_agent", "list_tasks", "get_task", "wait_for_tasks", "search_history", "repo_clone"]),
 }
 /** The tool `_meta` key that keeps a tool out of the CLI's tool search (Claude Code 2.1+). */
@@ -850,6 +851,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       safe(async (a: { project: string; message: string; act_on_reply?: boolean }) => {
         if (!deps.captains) return fail("Captains are not available in this Box Yard process.")
         const msg = deps.captains.send(a.project, a.message, { source: "coordinator", tool: "send_to_captain", actOnReply: a.act_on_reply === true })
+        deps.ownerQuestions?.coordinatorReplied(msg.projectId)
         return ok({ delivered: true, projectId: msg.projectId, messageId: msg.id, state: deps.captains.state(msg.projectId) })
       }),
     ),
@@ -869,7 +871,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       },
       safe(async (a: { project: string; message: string; timeout_seconds?: number }) => {
         if (!deps.captains) return fail("Captains are not available in this Box Yard process.")
-        return ok(await deps.captains.ask(a.project, a.message, a.timeout_seconds ?? CAPTAIN_WAIT_DEFAULT_SECONDS))
+        const p = project(a.project)
+        const asked = deps.captains.ask(p.id, a.message, a.timeout_seconds ?? CAPTAIN_WAIT_DEFAULT_SECONDS)
+        // Before the wait: a question the Captain asks in this reply is a new one.
+        deps.ownerQuestions?.coordinatorReplied(p.id)
+        return ok(await asked)
       }),
     ),
   )
@@ -1909,15 +1915,25 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     "list_inbox",
     {
       description:
-        "Tasks waiting on Cody (questions) or ready for review (PRs), and failures. Quiet schedule runs (no-ops) never show here. PR states are checked with GitHub just before (prCheckedAt); one marked prUnverified may already be merged.",
+        "Tasks waiting on Cody (questions) or ready for review (PRs), and failures. Quiet schedule runs (no-ops) never show here. PR states are checked with GitHub just before (prCheckedAt); one marked prUnverified may already be merged. When Captains' questions are open in Cody's Inbox, it returns { tasks, ownerQuestions } instead: check them before ask_owner.",
     },
     safe(async () => {
       const inbox = () => withoutQuiet(store.listTasks({ projectId: scopeId ?? undefined, status: ["needs_input", "pr_ready", "failed"] }))
       // A PR merged outside Box Yard leaves the inbox here (its task moves to done) instead of being reported as waiting.
       await refreshPrs(inbox())
-      return ok(inbox().map(brief))
+      // Captains' questions already in Cody's Inbox (ask_owner), so the Coordinator doesn't file them again.
+      const asked = (scopeId ? [] : (deps.ownerQuestions?.listOpen() ?? [])).map((q) => ({
+        id: q.id,
+        project: store.getProject(q.projectId)?.name ?? q.projectId,
+        ...(statusOnly(q.projectId) ? { statusOnly: true, text: STATUS_ONLY_FIELD } : { text: q.text }),
+        filedBy: q.filedBy,
+        createdAt: new Date(q.createdAt).toISOString(),
+      }))
+      return ok(asked.length ? { tasks: inbox().map(brief), ownerQuestions: asked } : inbox().map(brief))
     }),
   )
+
+  coordinatorOnly(registerAskOwner(server, { project, unsealed, owner, ownerQuestions: deps.ownerQuestions }))
 
   coordinatorOnly(
     server.registerTool(
