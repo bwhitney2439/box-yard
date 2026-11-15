@@ -37,6 +37,8 @@ const EMOJI_KIND: Record<string, NoticeKind> = {
   "📝": "notes",
   // The Coordinator's update_settings (server/mcp.ts).
   "⚙": "settings",
+  // Cody's Inbox questions from Captains: filed by Box Yard, answered or dismissed (server/ownerQuestions.ts).
+  "📥": "message",
 }
 
 const LEADING_EMOJI = /^\s*(\p{Extended_Pictographic})️?\s*/u

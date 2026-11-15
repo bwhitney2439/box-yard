@@ -52,6 +52,7 @@ import type { Artifact, CompactionTaskSnapshot, OrchestratorCompactionRecord } f
 import { compactionTime, findCompactionRecord } from "./compactions.js"
 import { CompactionIndex, FULL_CHUNK_MAX } from "./compactionIndex.js"
 import type { Identities } from "./identity/identities.js"
+import type { OwnerQuestions } from "./ownerQuestions.js"
 import { IdentityDetector } from "./identity/detect.js"
 import { applyRefs, assignChecked, createWithRefs, detectFor, importDetected, testRepos, type IdentityRefs } from "./identity/setup.js"
 import { redact } from "./credentials.js"
@@ -81,6 +82,8 @@ export interface McpDeps {
   /** get_settings / update_settings (Coordinator only). Optional so tests can build the server without them. */
   settingsTools?: SettingsTools
   captains?: CaptainManager
+  /** Cody's Inbox questions from Captains (ask_owner, docs/specs/inbox-owner-questions.md). Optional so tests can build the server without it. */
+  ownerQuestions?: OwnerQuestions
   /** Optional so older tests can build the server without it; then the hook tools aren't offered. */
   hooks?: HookEngine
   /** Every note change goes through it. Built from the other deps when a test leaves it out. */

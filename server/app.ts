@@ -47,6 +47,8 @@ import { heavyDevRoutes, seedHeavy } from "./mockHeavy.js"
 import { QStash, verifyQStashSignature } from "./qstash.js"
 import { describeCron, nextRuns, parseCron, isValidTimeZone } from "../shared/cron.js"
 import { HookStore } from "./hookStore.js"
+import { OwnerQuestions } from "./ownerQuestions.js"
+import { ownerQuestionRoutes } from "./ownerQuestionsRoutes.js"
 import { HookEngine } from "./hooks.js"
 import { HOOK_ACTIONS, HOOK_SOURCES, HOOK_TEMPLATES, HOOK_TRIGGERS } from "../shared/hooks.js"
 import { DEFAULT_OWNER_NAME } from "../shared/owner.js"
@@ -412,6 +414,8 @@ export interface BoxYard {
   tts: TtsService
   hooks: HookEngine
   notes: ProjectNotes
+  /** Cody's Inbox questions from Captains (docs/specs/inbox-owner-questions.md). */
+  ownerQuestions: OwnerQuestions
   retro: NotesRetro
   /** Settings › Docker and the containers behind "Runs on: Docker container" (docs/docker.md). */
   docker: DockerService
@@ -851,6 +855,17 @@ export function createBoxYard(
     if (!report.fyi) orchestrator.nudge()
   }
   store.onNotification = (notification) => hub.broadcast({ type: "notification", notification })
+  const ownerQuestions = new OwnerQuestions({
+    db,
+    store,
+    hub,
+    ownerName: () => settings.get().ownerName,
+    statusOnly: (projectId) => identities.statusOnly(projectId),
+    coordinatorBusy: () => orchestrator.busy,
+    messageCoordinator: (content, meta) => void orchestrator.hookMessage(content, meta),
+    messageCaptain: (projectId, content, id) => void captains.send(projectId, content, { source: "cody", id }),
+    captainNotice: (projectId, content, meta) => void captains.projectNotice(projectId, content, meta, { wake: false }),
+  })
   const auth = new Auth(c.password, store)
   const publicUrl = () => c.publicUrl
 
@@ -955,7 +970,7 @@ export function createBoxYard(
   app.all(
     "/mcp",
     mcpHandler(
-      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
+      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, ownerQuestions, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
       mcpToken,
       handshakes,
     ),
@@ -1025,6 +1040,7 @@ export function createBoxYard(
   const api = express.Router()
   api.use(auth.middleware())
   transcriptHistoryRoutes(api, store)
+  ownerQuestionRoutes(api, ownerQuestions)
 
   /** The Coordinator's CLI versions, looked up once, before /api/health reads them. */
   const lookUpClis = async () => {
@@ -2287,6 +2303,7 @@ export function createBoxYard(
     tts,
     hooks,
     notes,
+    ownerQuestions,
     retro,
     docker: dockerService,
     machines,
@@ -2304,6 +2321,7 @@ export function createBoxYard(
       orchestrator.resumeScheduled()
       captains.resume()
       captains.startUpkeep()
+      ownerQuestions.start()
       stopSnapshots = startSelfSnapshots(c, db)
       stopHold = startSelfHold(c, () => {
         if (orchestrator.busy) return true
@@ -2319,6 +2337,7 @@ export function createBoxYard(
       })
     },
     stop() {
+      ownerQuestions.stop()
       retro.stop()
       hooks.stop()
       scheduler.stop()
