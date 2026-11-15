@@ -6,7 +6,8 @@
 import { redactSecretShapes } from "../../../shared/secretShapes"
 import type { AppNotification, NotifyStatus } from "../../../shared/types"
 import { failureSummary } from "./failure"
-import { taskSessionHref, APP_HOME } from "./navigation"
+import { APP_HOME } from "./navigation"
+import { notificationHref } from "./notifications"
 
 const BROWSER_KEY = "boxyard:browser-notifications"
 const WORKER_URL = "/sw.js"
@@ -64,12 +65,14 @@ export function lockScreenText(text: string | null | undefined, max = 140): stri
 export function planBrowserNotification(burst: readonly AppNotification[]): BrowserNote | null {
   const latest = new Map<string, AppNotification>()
   for (const n of burst) {
-    if (!n.taskId) continue
-    const prev = latest.get(n.taskId)
-    if (!prev || n.createdAt >= prev.createdAt) latest.set(n.taskId, n)
+    // One with no task that asks (an Inbox question for Cody) is keyed by where it links. A box's stay in-app.
+    const key = n.taskId ?? (n.status === "needs_input" ? n.href : null)
+    if (!key) continue
+    const prev = latest.get(key)
+    if (!prev || n.createdAt >= prev.createdAt) latest.set(key, n)
   }
   const items = [...latest.values()]
-    .filter((n): n is AppNotification & { status: BrowserStatus; taskId: string } => !n.readAt && isBrowserStatus(n.status))
+    .filter((n): n is AppNotification & { status: BrowserStatus } => !n.readAt && isBrowserStatus(n.status))
     .sort((a, b) => b.createdAt - a.createdAt)
   if (!items.length) return null
   if (items.length === 1) {
@@ -80,9 +83,9 @@ export function planBrowserNotification(burst: readonly AppNotification[]): Brow
     return {
       title: lockScreenText(n.title, 80) || "A task",
       body: [project ? `${PHRASE[n.status]} · ${project}` : PHRASE[n.status], lockScreenText(line)].filter(Boolean).join("\n"),
-      href: taskSessionHref(n.taskId),
+      href: notificationHref(n),
       tag: n.id,
-      taskId: n.taskId,
+      taskId: n.taskId ?? null,
     }
   }
   const breakdown = URGENCY.map((s) => [s, items.filter((n) => n.status === s).length] as const)
